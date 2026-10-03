@@ -15,7 +15,7 @@ echo е§дкБрвы Clip2File.exe ...
 "%CSC%" /nologo /target:winexe /platform:anycpu /optimize+ /codepage:65001 ^
     /win32icon:build\app.ico ^
     /out:Clip2File.exe ^
-    /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:Microsoft.VisualBasic.dll ^
+    /r:System.dll /r:System.Drawing.dll /r:System.Windows.Forms.dll /r:Microsoft.VisualBasic.dll /r:Microsoft.CSharp.dll ^
     src\Clip2File.cs
 
 if errorlevel 1 (

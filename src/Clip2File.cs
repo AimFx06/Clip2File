@@ -1,5 +1,5 @@
 // Clip2File - 把剪贴板里的截图保存到你当前打开的那个文件夹
-// v0.1.1 | MIT License
+// v0.1.2 | MIT License
 //
 // 为什么需要它：Windows 截图后图片只进剪贴板（位图格式），而文件夹的"粘贴"
 // 只认文件列表格式，所以粘不进去。本工具补上这一步。
@@ -23,7 +23,7 @@ namespace Clip2File
     internal static class AppInfo
     {
         public const string Name = "Clip2File";
-        public const string Version = "0.1.1";
+        public const string Version = "0.1.2";
         public const string MutexName = "Clip2File_SingleInstance_v1";
         public const string DirName = "Clip2File";
     }
@@ -104,39 +104,62 @@ namespace Clip2File
             catch { }
         }
 
+        /// <summary>最近一次成功保存到的目录（仅内部使用）</summary>
         public static string LastDir
         {
             get { return ReadFile("last.txt"); }
             set { WriteFile("last.txt", value); }
         }
+    }
 
-        /// <summary>识别不到打开着的文件夹时，图片落到这里。默认：图片\Clip2File</summary>
-        public static string DefaultDir
+    /// <summary>开机自启：靠"启动"文件夹里的一个快捷方式实现，不写注册表。</summary>
+    internal static class Autostart
+    {
+        private static readonly string LnkPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.Startup), AppInfo.Name + ".lnk");
+
+        public static bool IsEnabled
         {
             get
             {
-                string d = ReadFile("default.txt");
-                if (!string.IsNullOrEmpty(d)) return d;
-                return BuiltinDefaultDir();
+                try { return File.Exists(LnkPath); }
+                catch { return false; }
             }
-            set { WriteFile("default.txt", value); }
         }
 
-        public static string BuiltinDefaultDir()
+        public static void Enable()
         {
             try
             {
-                string pics = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures);
-                if (!string.IsNullOrEmpty(pics)) return Path.Combine(pics, AppInfo.Name);
+                dynamic sh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+                dynamic sc = sh.CreateShortcut(LnkPath);
+                sc.TargetPath = Application.ExecutablePath;
+                sc.WorkingDirectory = Path.GetDirectoryName(Application.ExecutablePath);
+                sc.Description = AppInfo.Name + " - 截图存进当前文件夹";
+                sc.Save();
             }
             catch { }
+        }
+
+        public static void Disable()
+        {
+            try { if (File.Exists(LnkPath)) File.Delete(LnkPath); }
+            catch { }
+        }
+
+        /// <summary>已开启但指向旧路径（比如程序被移动过）时，自动修正。</summary>
+        public static void Repair()
+        {
+            if (!IsEnabled) return;
             try
             {
-                string desk = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
-                if (!string.IsNullOrEmpty(desk)) return Path.Combine(desk, AppInfo.Name);
+                dynamic sh = Activator.CreateInstance(Type.GetTypeFromProgID("WScript.Shell"));
+                dynamic sc = sh.CreateShortcut(LnkPath);
+                string target = (string)sc.TargetPath;
+                if (!string.Equals(target, Application.ExecutablePath, StringComparison.OrdinalIgnoreCase))
+                    Enable();
             }
             catch { }
-            return string.Empty;
         }
     }
 
@@ -219,14 +242,6 @@ namespace Clip2File
 
     internal static class Saver
     {
-        public static bool EnsureDir(string d)
-        {
-            if (string.IsNullOrEmpty(d)) return false;
-            try { if (!Directory.Exists(d)) Directory.CreateDirectory(d); }
-            catch { }
-            return Directory.Exists(d);
-        }
-
         /// <summary>把剪贴板里的图片取成 PNG 字节；没有图片返回 null。</summary>
         public static byte[] ClipboardImageBytes()
         {
@@ -332,19 +347,16 @@ namespace Clip2File
         private readonly Label lblState = new Label();
         private readonly Label lblHint = new Label();
         private readonly Label lblRule = new Label();
-        private readonly Label lblDefCaption = new Label();
-        private readonly Label lblLastCaption = new Label();
-        private readonly TextBox txtDef = new TextBox();
-        private readonly TextBox txtLast = new TextBox();
         private readonly Label lblFooter = new Label();
         private readonly Button btnSave = new Button();
         private readonly Button btnPick = new Button();
-        private readonly Button btnDef = new Button();
+        private readonly CheckBox chkAuto = new CheckBox();
         private readonly CheckBox chkTray = new CheckBox();
 
         private string hotkeyText = "（未注册）";
         private bool hotkeyOk;
         private bool reallyExit;
+        private bool suppressAutoEvent;
         private IntPtr lastExplorerHwnd = IntPtr.Zero;
         private IntPtr lastForeground = IntPtr.Zero;
         private string lastKnownDir;
@@ -354,7 +366,7 @@ namespace Clip2File
             BuildUi();
             BuildTray();
             RegisterHotkeys();
-            RefreshLabels();
+            Autostart.Repair();
             StartWatcher();
             Shown += delegate { WarnIfHotkeyFailed(); };
         }
@@ -368,7 +380,7 @@ namespace Clip2File
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(440, 336);
+            ClientSize = new Size(440, 258);
             BackColor = Color.White;
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
@@ -387,75 +399,54 @@ namespace Clip2File
 
             lblRule.AutoSize = true;
             lblRule.ForeColor = Color.FromArgb(140, 140, 140);
-            lblRule.Location = new Point(22, 70);
-            lblRule.Text = "图片存进当前打开的文件夹，没有则存下面";
+            lblRule.Location = new Point(22, 72);
+            lblRule.Text = "图片会存进你当前打开的文件夹";
 
-            lblDefCaption.AutoSize = true;
-            lblDefCaption.ForeColor = Color.FromArgb(120, 120, 120);
-            lblDefCaption.Location = new Point(22, 104);
-            lblDefCaption.Text = "默认位置";
+            chkAuto.AutoSize = true;
+            chkAuto.Location = new Point(22, 112);
+            chkAuto.Text = "开机自动启动";
+            chkAuto.CheckedChanged += delegate
+            {
+                if (suppressAutoEvent) return;
+                if (chkAuto.Checked) Autostart.Enable();
+                else Autostart.Disable();
+            };
 
-            txtDef.ReadOnly = true;
-            txtDef.BorderStyle = BorderStyle.FixedSingle;
-            txtDef.BackColor = Color.FromArgb(248, 249, 251);
-            txtDef.ForeColor = Color.FromArgb(60, 60, 60);
-            txtDef.Location = new Point(20, 122);
-            txtDef.Size = new Size(320, 25);
-            txtDef.TabStop = false;
-
-            btnDef.Text = "更改…";
-            btnDef.Location = new Point(348, 121);
-            btnDef.Size = new Size(74, 27);
-            btnDef.FlatStyle = FlatStyle.System;
-            btnDef.Click += delegate { ChangeDefaultDir(); };
-
-            lblLastCaption.AutoSize = true;
-            lblLastCaption.ForeColor = Color.FromArgb(120, 120, 120);
-            lblLastCaption.Location = new Point(22, 162);
-            lblLastCaption.Text = "上次保存到";
-
-            txtLast.ReadOnly = true;
-            txtLast.BorderStyle = BorderStyle.FixedSingle;
-            txtLast.BackColor = Color.FromArgb(248, 249, 251);
-            txtLast.ForeColor = Color.FromArgb(60, 60, 60);
-            txtLast.Location = new Point(20, 180);
-            txtLast.Size = new Size(402, 25);
-            txtLast.TabStop = false;
+            chkTray.AutoSize = true;
+            chkTray.Location = new Point(22, 142);
+            chkTray.Checked = true;
+            chkTray.Text = "关闭窗口时留在托盘继续工作";
 
             btnSave.Text = "立即保存";
-            btnSave.Location = new Point(20, 216);
+            btnSave.Location = new Point(20, 182);
             btnSave.Size = new Size(120, 34);
             btnSave.FlatStyle = FlatStyle.System;
             btnSave.Click += delegate { DoSave(false); };
 
             btnPick.Text = "另选文件夹…";
-            btnPick.Location = new Point(150, 216);
+            btnPick.Location = new Point(150, 182);
             btnPick.Size = new Size(130, 34);
             btnPick.FlatStyle = FlatStyle.System;
             btnPick.Click += delegate { DoSave(true); };
 
-            chkTray.AutoSize = true;
-            chkTray.Location = new Point(20, 262);
-            chkTray.Checked = true;
-            chkTray.Text = "关闭窗口时留在托盘继续工作";
-
             lblFooter.AutoSize = true;
             lblFooter.ForeColor = Color.FromArgb(155, 155, 155);
-            lblFooter.Location = new Point(20, 296);
+            lblFooter.Location = new Point(20, 234);
             lblFooter.Text = "托盘图标右键可退出　·　" + AppInfo.Name + " v" + AppInfo.Version;
 
             Controls.Add(lblState);
             Controls.Add(lblHint);
             Controls.Add(lblRule);
-            Controls.Add(lblDefCaption);
-            Controls.Add(txtDef);
-            Controls.Add(btnDef);
-            Controls.Add(lblLastCaption);
-            Controls.Add(txtLast);
+            Controls.Add(chkAuto);
+            Controls.Add(chkTray);
             Controls.Add(btnSave);
             Controls.Add(btnPick);
-            Controls.Add(chkTray);
             Controls.Add(lblFooter);
+
+            // 读一次真实的自启状态（此时不触发写操作）
+            suppressAutoEvent = true;
+            chkAuto.Checked = Autostart.IsEnabled;
+            suppressAutoEvent = false;
         }
 
         private void BuildTray()
@@ -465,8 +456,7 @@ namespace Clip2File
             menu.Items.Add("另选文件夹并保存…", null, delegate { DoSave(true); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开主窗口", null, delegate { ShowMain(); });
-            menu.Items.Add("打开默认位置", null, delegate { OpenDir(Settings.DefaultDir); });
-            menu.Items.Add("打开上次保存的位置", null, delegate { OpenDir(Settings.LastDir); });
+            menu.Items.Add("打开上次保存的位置", null, delegate { OpenLast(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { ExitApp(); });
 
@@ -554,11 +544,9 @@ namespace Clip2File
         }
 
         // -------------------------------------------------------- actions
-        /// <summary>决定存到哪里：当前文件夹 → 最近打开过的文件夹 → 唯一的文件夹窗口 → 默认位置</summary>
-        private string ResolveTargetDir(out bool usedDefault)
+        /// <summary>找目标文件夹：当前前台文件夹 → 最近打开过的文件夹 → 唯一的文件夹窗口</summary>
+        private string ResolveTargetDir()
         {
-            usedDefault = false;
-
             string dir = ShellWindows.ForegroundPath();
             if (!string.IsNullOrEmpty(dir)) return dir;
 
@@ -570,18 +558,12 @@ namespace Clip2File
 
             if (!string.IsNullOrEmpty(lastKnownDir) && Directory.Exists(lastKnownDir)) return lastKnownDir;
 
-            dir = ShellWindows.SingleWindowPath();
-            if (!string.IsNullOrEmpty(dir)) return dir;
-
-            usedDefault = true;
-            return Settings.DefaultDir;
+            return ShellWindows.SingleWindowPath();
         }
 
         private void DoSave(bool pickFolder)
         {
             string dir;
-            bool usedDefault = false;
-            string tail = string.Empty;
 
             if (pickFolder)
             {
@@ -591,14 +573,15 @@ namespace Clip2File
             }
             else
             {
-                dir = ResolveTargetDir(out usedDefault);
-                if (!Saver.EnsureDir(dir))
+                dir = ResolveTargetDir();
+                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
                 {
-                    Balloon("没有可用的保存位置", "请在主窗口里设置一个默认位置", ToolTipIcon.Warning);
+                    Balloon("没有找到打开的文件夹",
+                        "先打开要保存到的文件夹，再按 " + hotkeyText + "；\n也可以点「另选文件夹…」手动选一个。",
+                        ToolTipIcon.Warning);
                     if (!Visible) ShowMain();
                     return;
                 }
-                if (usedDefault) tail = "\n（默认位置）";
             }
 
             byte[] bytes = Saver.ClipboardImageBytes();
@@ -608,8 +591,7 @@ namespace Clip2File
                 {
                     string path = Saver.SaveImage(dir, bytes);
                     Settings.LastDir = dir;
-                    RefreshLabels();
-                    Balloon("已保存截图", Path.GetFileName(path) + "\n" + dir + tail, ToolTipIcon.Info);
+                    Balloon("已保存截图", Path.GetFileName(path) + "\n" + dir, ToolTipIcon.Info);
                     return;
                 }
                 catch (Exception ex)
@@ -623,8 +605,7 @@ namespace Clip2File
             if (copied.Count > 0)
             {
                 Settings.LastDir = dir;
-                RefreshLabels();
-                Balloon("已复制文件", copied.Count + " 个文件 → " + dir + tail, ToolTipIcon.Info);
+                Balloon("已复制文件", copied.Count + " 个文件 → " + dir, ToolTipIcon.Info);
                 return;
             }
 
@@ -643,39 +624,15 @@ namespace Clip2File
             }
         }
 
-        private void ChangeDefaultDir()
+        private void OpenLast()
         {
-            using (FolderBrowserDialog dlg = new FolderBrowserDialog())
+            string last = Settings.LastDir;
+            if (!string.IsNullOrEmpty(last) && Directory.Exists(last))
             {
-                dlg.Description = "选择识别不到文件夹时要用的默认保存位置";
-                dlg.ShowNewFolderButton = true;
-                string cur = Settings.DefaultDir;
-                if (!string.IsNullOrEmpty(cur) && Directory.Exists(cur)) dlg.SelectedPath = cur;
-                if (dlg.ShowDialog(this) == DialogResult.OK)
-                {
-                    Settings.DefaultDir = dlg.SelectedPath;
-                    RefreshLabels();
-                }
-            }
-        }
-
-        private void OpenDir(string dir)
-        {
-            if (!string.IsNullOrEmpty(dir) && Directory.Exists(dir))
-            {
-                try { System.Diagnostics.Process.Start("explorer.exe", "\"" + dir + "\""); }
+                try { System.Diagnostics.Process.Start("explorer.exe", "\"" + last + "\""); }
                 catch { }
             }
-            else Balloon("目录不存在", "还没有保存过，或目录已被删除", ToolTipIcon.Info);
-        }
-
-        private void RefreshLabels()
-        {
-            string def = Settings.DefaultDir;
-            txtDef.Text = string.IsNullOrEmpty(def) ? "（未设置）" : def;
-
-            string last = Settings.LastDir;
-            txtLast.Text = string.IsNullOrEmpty(last) ? "（还没有保存过）" : last;
+            else Balloon("还没有保存记录", "先保存一张截图试试", ToolTipIcon.Info);
         }
 
         private void Balloon(string title, string text, ToolTipIcon icon)
@@ -738,8 +695,7 @@ namespace Clip2File
                 if (a0 == "--save" || a0 == "-s")
                 {
                     string dir = args.Length > 1 ? args[1] : ShellWindows.ForegroundPath();
-                    if (string.IsNullOrEmpty(dir)) dir = Settings.DefaultDir;
-                    if (!Saver.EnsureDir(dir)) return;
+                    if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return;
 
                     byte[] bytes = Saver.ClipboardImageBytes();
                     if (bytes != null && bytes.Length > 0)
@@ -762,7 +718,7 @@ namespace Clip2File
                         "  双击运行            启动托盘程序，截图后按 Ctrl+Alt+V\n" +
                         "  Clip2File.exe --save <文件夹>    静默保存一次后退出\n\n" +
                         "保存规则：\n" +
-                        "  · 剪贴板里是图片 → 存成 截图_时间戳.png\n" +
+                        "  · 图片会存进你当前打开的那个文件夹\n" +
                         "  · 剪贴板里是文件 → 复制这些文件到目标文件夹\n",
                         AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Information);
                     return;
