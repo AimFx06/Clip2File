@@ -1,5 +1,5 @@
 // Clip2File - 把剪贴板里的截图保存到你当前打开的那个文件夹
-// v0.1.3 | MIT License
+// v1.0.0 | MIT License
 //
 // 为什么需要它：Windows 截图后图片只进剪贴板（位图格式），而文件夹的"粘贴"
 // 只认文件列表格式，所以粘不进去。本工具补上这一步。
@@ -23,7 +23,7 @@ namespace Clip2File
     internal static class AppInfo
     {
         public const string Name = "Clip2File";
-        public const string Version = "0.1.3";
+        public const string Version = "1.0.0";
         public const string MutexName = "Clip2File_SingleInstance_v1";
         public const string DirName = "Clip2File";
     }
@@ -377,7 +377,7 @@ namespace Clip2File
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(440, 192);
+            ClientSize = new Size(440, 244);
             BackColor = Color.White;
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
@@ -386,21 +386,21 @@ namespace Clip2File
             lblState.AutoSize = true;
             lblState.Font = new Font(Font.FontFamily, 12F, FontStyle.Bold);
             lblState.ForeColor = Color.FromArgb(32, 150, 72);
-            lblState.Location = new Point(20, 16);
+            lblState.Location = new Point(22, 22);
             lblState.Text = "● 正在运行";
 
             lblHint.AutoSize = true;
             lblHint.ForeColor = Color.FromArgb(80, 80, 80);
-            lblHint.Location = new Point(22, 48);
+            lblHint.Location = new Point(24, 164);
             lblHint.Text = string.Empty;
 
             lblRule.AutoSize = true;
             lblRule.ForeColor = Color.FromArgb(140, 140, 140);
-            lblRule.Location = new Point(22, 72);
+            lblRule.Location = new Point(24, 188);
             lblRule.Text = "图片会存进你当前打开的文件夹";
 
             chkAuto.AutoSize = true;
-            chkAuto.Location = new Point(22, 120);
+            chkAuto.Location = new Point(24, 76);
             chkAuto.Text = "开机自动启动";
             chkAuto.CheckedChanged += delegate
             {
@@ -410,7 +410,7 @@ namespace Clip2File
             };
 
             chkTray.AutoSize = true;
-            chkTray.Location = new Point(22, 150);
+            chkTray.Location = new Point(24, 106);
             chkTray.Checked = true;
             chkTray.Text = "关闭窗口时留在托盘继续工作";
 
@@ -429,10 +429,7 @@ namespace Clip2File
         private void BuildTray()
         {
             ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("保存剪贴板图片", null, delegate { DoSave(); });
-            menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开主窗口", null, delegate { ShowMain(); });
-            menu.Items.Add("打开上次保存的位置", null, delegate { OpenLast(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("退出", null, delegate { ExitApp(); });
 
@@ -574,17 +571,6 @@ namespace Clip2File
             }
 
             Balloon("剪贴板里没有图片", "先截图（Win+Shift+S）或复制文件，再按 " + hotkeyText, ToolTipIcon.Warning);
-        }
-
-        private void OpenLast()
-        {
-            string last = Settings.LastDir;
-            if (!string.IsNullOrEmpty(last) && Directory.Exists(last))
-            {
-                try { System.Diagnostics.Process.Start("explorer.exe", "\"" + last + "\""); }
-                catch { }
-            }
-            else Balloon("还没有保存记录", "先保存一张截图试试", ToolTipIcon.Info);
         }
 
         private void Balloon(string title, string text, ToolTipIcon icon)
