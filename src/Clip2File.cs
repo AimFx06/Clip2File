@@ -1,5 +1,5 @@
 // Clip2File - 把剪贴板里的截图保存到你当前打开的那个文件夹
-// v0.1.2 | MIT License
+// v0.1.3 | MIT License
 //
 // 为什么需要它：Windows 截图后图片只进剪贴板（位图格式），而文件夹的"粘贴"
 // 只认文件列表格式，所以粘不进去。本工具补上这一步。
@@ -23,7 +23,7 @@ namespace Clip2File
     internal static class AppInfo
     {
         public const string Name = "Clip2File";
-        public const string Version = "0.1.2";
+        public const string Version = "0.1.3";
         public const string MutexName = "Clip2File_SingleInstance_v1";
         public const string DirName = "Clip2File";
     }
@@ -347,9 +347,6 @@ namespace Clip2File
         private readonly Label lblState = new Label();
         private readonly Label lblHint = new Label();
         private readonly Label lblRule = new Label();
-        private readonly Label lblFooter = new Label();
-        private readonly Button btnSave = new Button();
-        private readonly Button btnPick = new Button();
         private readonly CheckBox chkAuto = new CheckBox();
         private readonly CheckBox chkTray = new CheckBox();
 
@@ -380,7 +377,7 @@ namespace Clip2File
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
-            ClientSize = new Size(440, 258);
+            ClientSize = new Size(440, 192);
             BackColor = Color.White;
             Font = new Font("Microsoft YaHei UI", 9F, FontStyle.Regular, GraphicsUnit.Point);
             try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
@@ -403,7 +400,7 @@ namespace Clip2File
             lblRule.Text = "图片会存进你当前打开的文件夹";
 
             chkAuto.AutoSize = true;
-            chkAuto.Location = new Point(22, 112);
+            chkAuto.Location = new Point(22, 120);
             chkAuto.Text = "开机自动启动";
             chkAuto.CheckedChanged += delegate
             {
@@ -413,35 +410,15 @@ namespace Clip2File
             };
 
             chkTray.AutoSize = true;
-            chkTray.Location = new Point(22, 142);
+            chkTray.Location = new Point(22, 150);
             chkTray.Checked = true;
             chkTray.Text = "关闭窗口时留在托盘继续工作";
-
-            btnSave.Text = "立即保存";
-            btnSave.Location = new Point(20, 182);
-            btnSave.Size = new Size(120, 34);
-            btnSave.FlatStyle = FlatStyle.System;
-            btnSave.Click += delegate { DoSave(false); };
-
-            btnPick.Text = "另选文件夹…";
-            btnPick.Location = new Point(150, 182);
-            btnPick.Size = new Size(130, 34);
-            btnPick.FlatStyle = FlatStyle.System;
-            btnPick.Click += delegate { DoSave(true); };
-
-            lblFooter.AutoSize = true;
-            lblFooter.ForeColor = Color.FromArgb(155, 155, 155);
-            lblFooter.Location = new Point(20, 234);
-            lblFooter.Text = "托盘图标右键可退出　·　" + AppInfo.Name + " v" + AppInfo.Version;
 
             Controls.Add(lblState);
             Controls.Add(lblHint);
             Controls.Add(lblRule);
             Controls.Add(chkAuto);
             Controls.Add(chkTray);
-            Controls.Add(btnSave);
-            Controls.Add(btnPick);
-            Controls.Add(lblFooter);
 
             // 读一次真实的自启状态（此时不触发写操作）
             suppressAutoEvent = true;
@@ -452,8 +429,7 @@ namespace Clip2File
         private void BuildTray()
         {
             ContextMenuStrip menu = new ContextMenuStrip();
-            menu.Items.Add("保存剪贴板图片", null, delegate { DoSave(false); });
-            menu.Items.Add("另选文件夹并保存…", null, delegate { DoSave(true); });
+            menu.Items.Add("保存剪贴板图片", null, delegate { DoSave(); });
             menu.Items.Add(new ToolStripSeparator());
             menu.Items.Add("打开主窗口", null, delegate { ShowMain(); });
             menu.Items.Add("打开上次保存的位置", null, delegate { OpenLast(); });
@@ -514,7 +490,7 @@ namespace Clip2File
 
             lblHint.Text = hotkeyOk
                 ? "截图后按 " + hotkeyText + " 保存"
-                : "热键被占用，请用「另选文件夹…」手动保存";
+                : "热键被占用，请用托盘图标右键菜单保存";
             tray.Text = AppInfo.Name + "　" + hotkeyText;
         }
 
@@ -523,7 +499,7 @@ namespace Clip2File
             if (hotkeyOk) return;
             MessageBox.Show(this,
                 "无法注册全局热键（Ctrl+Alt+V / X / Z 都被占用）。\n\n" +
-                "你仍然可以用窗口里的按钮或托盘菜单保存，\n" +
+                "你仍然可以用托盘图标右键菜单里的「保存剪贴板图片」，\n" +
                 "关掉占用热键的软件后重启本程序即可恢复。",
                 AppInfo.Name, MessageBoxButtons.OK, MessageBoxIcon.Warning);
         }
@@ -533,7 +509,7 @@ namespace Clip2File
             if (m.Msg == Native.WM_HOTKEY)
             {
                 int id = m.WParam.ToInt32();
-                if (id == IdSave) DoSave(false);
+                if (id == IdSave) DoSave();
                 else if (id == IdShow) ShowMain();
             }
             else if (MsgShow != 0 && (uint)m.Msg == MsgShow)
@@ -561,27 +537,15 @@ namespace Clip2File
             return ShellWindows.SingleWindowPath();
         }
 
-        private void DoSave(bool pickFolder)
+        private void DoSave()
         {
-            string dir;
-
-            if (pickFolder)
+            string dir = ResolveTargetDir();
+            if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
             {
+                Balloon("没有找到打开的文件夹",
+                    "先打开要保存到的文件夹，再按 " + hotkeyText, ToolTipIcon.Warning);
                 if (!Visible) ShowMain();
-                dir = PickFolder();
-                if (string.IsNullOrEmpty(dir)) return;
-            }
-            else
-            {
-                dir = ResolveTargetDir();
-                if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir))
-                {
-                    Balloon("没有找到打开的文件夹",
-                        "先打开要保存到的文件夹，再按 " + hotkeyText + "；\n也可以点「另选文件夹…」手动选一个。",
-                        ToolTipIcon.Warning);
-                    if (!Visible) ShowMain();
-                    return;
-                }
+                return;
             }
 
             byte[] bytes = Saver.ClipboardImageBytes();
@@ -610,18 +574,6 @@ namespace Clip2File
             }
 
             Balloon("剪贴板里没有图片", "先截图（Win+Shift+S）或复制文件，再按 " + hotkeyText, ToolTipIcon.Warning);
-        }
-
-        private string PickFolder()
-        {
-            using (FolderBrowserDialog dlg = new FolderBrowserDialog())
-            {
-                dlg.Description = "选择要保存到的文件夹";
-                dlg.ShowNewFolderButton = true;
-                string last = Settings.LastDir;
-                if (!string.IsNullOrEmpty(last) && Directory.Exists(last)) dlg.SelectedPath = last;
-                return dlg.ShowDialog(this) == DialogResult.OK ? dlg.SelectedPath : null;
-            }
         }
 
         private void OpenLast()
