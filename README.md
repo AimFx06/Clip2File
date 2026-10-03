@@ -16,6 +16,14 @@ Windows 小工具 · 免安装 · 单文件 · 25 KB
 **原因**：截图工具只往剪贴板写「位图数据」，而资源管理器的粘贴只认「文件列表」格式。
 这是 Windows 原生补不上的一步，Clip2File 来补。
 
+## 下载
+
+到 **[Releases](https://github.com/AimFx06/Clip2File/releases/latest)** 页面下载最新的
+`Clip2File-vX.Y.Z-win64.zip`，解压后双击 `Clip2File.exe` 就能用。
+
+> 仓库里只放源码，不放编译好的 exe —— 想自己编译就双击 `build.bat`，
+> 用的是 Windows 自带的 C# 编译器，不需要装任何东西。
+
 ## 怎么用
 
 | 步骤 | 操作 |

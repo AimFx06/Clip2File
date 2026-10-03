@@ -1,4 +1,8 @@
-# 编译产物与本地测试残留，不入库
+# 编译产物不入库 —— 要下载可执行文件请去 Releases 页
+Clip2File.exe
+_solo_test/
+
+# 本地测试残留
 _test_out/
 release/*.zip
 
